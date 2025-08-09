@@ -23,7 +23,6 @@ def get_args():
     parser.add_argument("--backbone", type=str, default="prithvi_eo_v2_600_tl")
     parser.add_argument("--epochs", type=int, default=50)
 
-    # 用默认列表没问题，但命令行传参想改的话建议用 --bands JSON；这里先保留默认
     parser.add_argument("--bands", dest="BANDS", default=['COASTAL AEROSOL','BLUE','GREEN','RED','RED_EDGE_1','RED_EDGE_2','RED_EDGE_3','NIR_BROAD','WATER_VAPOR','CIRRUS','SWIR_1','SWIR_2','SLOPE','DEM'])
     parser.add_argument("--batch_size", type=int, default=16)
     parser.add_argument("--num_workers", type=int, default=8)
@@ -31,7 +30,6 @@ def get_args():
     parser.add_argument("--lr", type=float, default=1e-4)
     parser.add_argument("--weight_decay", type=float, default=0.1)
 
-    # 布尔参数用 flag 方式
     parser.add_argument("--freeze_backbone", action="store_true")
     parser.add_argument("--plot_on_val", action="store_true")
     parser.add_argument("--device", type=list, default=[0,1,2,3]) 
