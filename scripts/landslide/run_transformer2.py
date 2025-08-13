@@ -67,7 +67,6 @@ def get_args():
 def main():
     cfg = get_args()
 
-    # 日志 & 断点目录
     log_dir = os.path.join(cfg.checkpoint_saving_path, cfg.log_saving_path)
     os.makedirs(log_dir, exist_ok=True)
     logger = TensorBoardLogger(save_dir=log_dir, name="landslide_itransformer")
@@ -93,7 +92,6 @@ def main():
         A.pytorch.transforms.ToTensorV2(),
     ]
 
-    # DataModule（与你原脚本保持一致）
     data_module = Landslide4SenseNonGeoDataModule(
         batch_size=cfg.batch_size,
         bands=cfg.BANDS,
@@ -104,7 +102,6 @@ def main():
         num_workers=cfg.num_workers,
     )
 
-    # 加载 Prithvi 模块（优先假设 checkpoint 是完整 nn.Module）
     prithvi_module = load_prithvi_module(cfg.backbone_ckpt)
 
     # Lightning 任务
@@ -133,7 +130,6 @@ def main():
         bn_eval_when_frozen=cfg.bn_eval_when_frozen,
     )
 
-    # Trainer（建议从 "ddp_find_unused_parameters_true" 换到 "ddp"）
     trainer = pl.Trainer(
         accelerator="cuda",
         strategy="ddp",
@@ -148,7 +144,6 @@ def main():
         callbacks=[checkpoint_callback],
     )
 
-    # 训练 + 测试
     trainer.fit(model, datamodule=data_module)
     ckpt_path = checkpoint_callback.best_model_path
     test_results = trainer.test(model, datamodule=data_module, ckpt_path=ckpt_path)
