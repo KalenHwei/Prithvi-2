@@ -12,6 +12,9 @@ import torch
 from terratorch.datamodules import Landslide4SenseNonGeoDataModule
 
 from itransformer import ITransformerSegTask
+# inherit checkpoints of Prithvi if available
+# from itransformer import ITransformerSegTask
+
 
 
 def get_args():

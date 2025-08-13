@@ -126,13 +126,7 @@ class Downsample(nn.Module):
 # ----------------------------
 
 class ITransformerBackbone(nn.Module):
-    """
-    A spatio-temporal backbone that applies temporal self-attention (iTransformer-style)
-    per spatial location, combined with lightweight spatial mixing via depthwise convs.
 
-    It produces 4 feature maps at strides 4, 8, 16, 32 (after averaging across time),
-    suitable for FPN/UPerNet-style decoders.
-    """
     def __init__(
         self,
         in_chans: int,
@@ -189,7 +183,7 @@ class ITransformerBackbone(nn.Module):
         # Stage 1
         for blk in self.stage1:
             x = blk(x)
-        f1 = x.mean(dim=1)  # average over time -> (B, D1, H/4, W/4)
+        f1 = x.mean(dim=1)  # (B, D1, H/4, W/4)
 
         # Stage 2
         x = self.ds1(x)
@@ -211,10 +205,6 @@ class ITransformerBackbone(nn.Module):
 
         return [f1, f2, f3, f4]
 
-
-# ----------------------------
-# Simple UPerNet/FPN-style decoder
-# ----------------------------
 
 class FPNDecoder(nn.Module):
     def __init__(self, in_dims: Tuple[int, int, int, int], out_dim: int = 256):
@@ -294,11 +284,6 @@ class ITransformerSegmentationModel(nn.Module):
         logits = self.head(p2)
         logits = F.interpolate(logits, size=(H, W), mode="bilinear", align_corners=False)
         return logits
-
-
-# ----------------------------
-# Lightning task (training loop)
-# ----------------------------
 
 class FocalLoss(nn.Module):
     def __init__(self, gamma: float = 2.0, alpha: Optional[float] = None, reduction: str = "mean"):
@@ -385,8 +370,6 @@ class ITransformerSegTask(pl.LightningModule):
         return self.model(x)
 
     def _step(self, batch, stage: str):
-        # Expect batch to be a dict from TerraTorch datamodule: keys 'image' and 'mask'
-        # Fallback to tuple (x, y)
         if isinstance(batch, dict):
             x = batch.get("image")
             y = batch.get("mask")

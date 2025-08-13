@@ -160,21 +160,16 @@ class MoEMLP(nn.Module):
         return y
 
 
-# --------------------------
 # 工具：自动替换 MLP->MoE
-# --------------------------
+
 def _looks_like_mlp(module: nn.Module) -> bool:
     """
-    经验性判断：是否像 ViT 的 MLP/FFN 模块
-    - 含 fc1/fc2（Linear）
-    - 或 子模块名包含 'mlp'/'ffn'
+    替换 fc1/fc2/mlp/ffn
     """
-    # 直接命名命中
     name = module.__class__.__name__.lower()
     if "mlp" in name or "ffn" in name:
         return True
 
-    # 结构命中：有两个线性层 fc1/fc2
     if hasattr(module, "fc1") and hasattr(module, "fc2"):
         if isinstance(module.fc1, nn.Linear) and isinstance(module.fc2, nn.Linear):
             return True
@@ -188,7 +183,7 @@ def _make_moe_from_mlp(mlp_module: nn.Module, n_experts: int, top_k: int,
         d_model = mlp_module.fc1.in_features
         d_ff = mlp_module.fc1.out_features
     else:
-        # 回退：尝试从子模块里找两个 Linear
+        # 从子模块里找两个 Linear
         linears = [m for m in mlp_module.modules() if isinstance(m, nn.Linear)]
         assert len(linears) >= 2, "Cannot infer dimensions for MoE; please pass custom builder."
         d_model = linears[0].in_features
@@ -227,13 +222,11 @@ def inject_moe(
 ) -> List[str]:
     """
     递归替换模型中的 MLP/FFN 子层为 MoEMLP。
-
     返回：被替换层的完全限定名列表。
     """
     replaced: List[str] = []
     candidates: List[str] = []
 
-    # 收集候选
     for full_name, module in root.named_modules():
         low = full_name.lower()
         if any(kw in low for kw in name_keywords) or _looks_like_mlp(module):
@@ -248,7 +241,6 @@ def inject_moe(
               "Consider adjusting name_keywords or implementing a custom selector.")
         return replaced
 
-    # 选择策略
     if select == "all":
         targets = candidates
     elif select == "last_k":
@@ -286,7 +278,6 @@ def collect_moe_aux_loss(root: nn.Module) -> torch.Tensor:
         if isinstance(m, MoEMLP) and (m._last_aux_loss is not None):
             aux = m._last_aux_loss if aux is None else aux + m._last_aux_loss
     if aux is None:
-        # 没有 MoE 或尚未前向
         return torch.tensor(0.0, device=next(root.parameters()).device)
     return aux
 
@@ -299,7 +290,6 @@ def reset_moe_aux_loss(root: nn.Module):
 def patch_training_step_with_moe(lightning_module: "nn.Module", aux_coef: float = 1e-2):
     """
     包装原 training_step，在返回 loss 之前把 sum(moe_aux_loss)*aux_coef 加上。
-    兼容 training_step 返回 Tensor 或 dict 的常见写法。
     """
     if not hasattr(lightning_module, "training_step"):
         raise AttributeError("The given module has no training_step to patch.")
@@ -323,7 +313,6 @@ def patch_training_step_with_moe(lightning_module: "nn.Module", aux_coef: float 
                 if "moe_aux" not in result:
                     result["moe_aux"] = aux.detach()
                 return result
-        # 其他自定义情况：直接返回原值（你也可以在此处 raise 提醒）
         return result
 
     lightning_module.training_step = wrapped_training_step
