@@ -1,32 +1,8 @@
-# itransformer.py
-# 将 Prithvi (ViT) 骨干作为“空间编码器”完整复用（可加载你现有的 .pt 权重），
-# 在其输出的中间层特征上，叠加一个“iTransformer 风格”的时序模块（仅沿时间维做注意力与前馈），
-# 最后接一个轻量 FPN/UPerNet 风格解码器做语义分割。
-#
-# 兼容输入：
-#   - 静态: (B, C, H, W)
-#   - 时序: (B, T, C, H, W)
-#
-# 注意：
-# 1) 该实现不修改 Prithvi 的空间结构，因而能最大化复用 checkpoint；
-#    新增的 TemporalMixer 参数随机初始化，默认可训练。
-# 2) “抓中间层特征”使用通用的“Block hooks”方式，不依赖具体类名；
-#    只要 Prithvi 的 forward 内部按顺序调用 Transformer blocks（ModuleList/Sequential），就能截取。
-# 3) Patch 大小需与你的 Prithvi 匹配（默认 16），请按实际模型设置。
-# 4) 如果你的 checkpoint 是 state_dict 而不是整模型，本脚本提供了非严格匹配加载（strict=False），
-#    但你需要用相同结构实例化骨干；这里优先尝试直接 load 一个保存的 nn.Module。
-#
-# 作者：你现在的 ChatGPT 助手
-
 from typing import List, Tuple, Optional, Dict, Any
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-
-# --------------------------
-# 小工具：Focal Loss（和你原脚本一致的名字）
-# --------------------------
 class FocalLoss(nn.Module):
     def __init__(self, alpha: float = 0.25, gamma: float = 2.0, reduction: str = "mean", ignore_index: int = -1):
         super().__init__()
@@ -53,17 +29,10 @@ class FocalLoss(nn.Module):
             return focal.sum()
         return focal
 
-
-# --------------------------
-# 通用：寻找 transformer blocks 并挂钩
-# --------------------------
+# 检测transformer blocks以便探测ffn或mlp
 def find_transformer_blocks(model: nn.Module) -> List[nn.Module]:
-    """
-    尽可能通用地搜集“Transformer Block”列表：
-    - 优先找 model.blocks (ModuleList)
-    - 其次尝试抓取包含子模块且具有 self-attn/ffn 结构的模块
-    """
-    # 1) 直接找属性名为 'blocks' 的模块列表
+
+    # 1) 找 'blocks'
     if hasattr(model, "blocks") and isinstance(model.blocks, (nn.ModuleList, nn.Sequential)):
         return list(model.blocks)
 
@@ -73,10 +42,9 @@ def find_transformer_blocks(model: nn.Module) -> List[nn.Module]:
         has_attn = any(hasattr(m, name) for name in ["attn", "attention", "self_attn", "self_attention"])
         has_ffn  = any(hasattr(m, name) for name in ["mlp", "ffn", "feed_forward"])
         if has_attn and has_ffn:
-            # 排除顶层模型本身
+
             if m is not model:
                 candidates.append(m)
-    # 去重且按发现顺序保留
     uniq = []
     seen = set()
     for m in candidates:
@@ -85,11 +53,9 @@ def find_transformer_blocks(model: nn.Module) -> List[nn.Module]:
             seen.add(id(m))
     return uniq
 
-
+# 加hook
 class BlockFeatureHook:
-    """
-    在给定的 block 索引上注册 forward hook，记录每个 block 的输出张量。
-    """
+
     def __init__(self, blocks: List[nn.Module], indices: List[int]):
         self.blocks = blocks
         self.indices = sorted(indices)
@@ -115,9 +81,9 @@ class BlockFeatureHook:
         self.handles.clear()
 
 
-# --------------------------
-# iTransformer 风格：仅沿“时间维 T”做注意力和前馈（不搅动空间 token）
-# --------------------------
+
+# iTransformer 仅沿T做注意力和ffn
+
 class TemporalBlock(nn.Module):
     """
     输入形状： (B, T, N, D)
@@ -186,9 +152,6 @@ class TemporalMixer(nn.Module):
         raise ValueError(f"Unknown pool: {self.pool}")
 
 
-# --------------------------
-# 轻量 FPN/UPerNet 解码器
-# --------------------------
 class FPNDecoder(nn.Module):
     """
     输入：来自 4 个层级的特征 [P2, P3, P4, P5]，每个为 (B, N_i, D)
@@ -241,9 +204,7 @@ class FPNDecoder(nn.Module):
         return out  # (B, num_classes, H, W) 与输入分辨率对齐
 
 
-# --------------------------
-# 主模型：Prithvi 空间编码 + 时序混合 + FPN 解码
-# --------------------------
+# 主模型：Prithvi 空间编码 + 时序 + FPN 解码
 class IPrithviSTModel(nn.Module):
     def __init__(
         self,
@@ -254,7 +215,7 @@ class IPrithviSTModel(nn.Module):
         temporal_mlp_ratio: float = 4.0,
         temporal_dropout: float = 0.0,
         temporal_pool: str = "mean",
-        dims_per_level: List[int] = [768, 768, 768, 768],  # 需与你的 Prithvi 隐藏维度匹配
+        dims_per_level: List[int] = [768, 768, 768, 768], 
         num_classes: int = 2,
         in_hw: Tuple[int, int] = (224, 224),
         patch_size: int = 16,
@@ -305,7 +266,6 @@ class IPrithviSTModel(nn.Module):
         with BlockFeatureHook(blocks, self.feature_indices) as h:
             _ = self.backbone(x1)  # 无需用返回值，hooks 会把中间输出写进 h.cache
             cache = {k: v for k, v in h.cache.items()}
-        # 剥掉 CLS（如果有的话）；有些 ViT 输出 (B, 1+N, D)
         for k, v in cache.items():
             if v.dim() == 3 and v.size(1) > 0:
                 # 如果 token 数 == 1 + patch_num，去掉第一个
@@ -337,7 +297,6 @@ class IPrithviSTModel(nn.Module):
             for idx in self.feature_indices:
                 feat_per_level[idx].append(cache[idx])  # list of (B,N,D)
 
-        # 组装为 4 个层级（按 indices 排序）
         feats_T = []
         for i, idx in enumerate(sorted(self.feature_indices)):
             f_list = feat_per_level[idx]                     # T * (B,N,D)
@@ -350,9 +309,7 @@ class IPrithviSTModel(nn.Module):
         return out
 
 
-# --------------------------
 # Lightning Task（与 run 脚本配合）
-# --------------------------
 import lightning.pytorch as pl
 from torchmetrics import JaccardIndex
 
@@ -487,9 +444,7 @@ class IPrithviSegTask(pl.LightningModule):
         return loss
 
 
-# --------------------------
 # 加载 Prithvi 模块的辅助函数
-# --------------------------
 def load_prithvi_module(ckpt_path: str) -> nn.Module:
     """
     优先尝试直接 load 一个保存的 nn.Module；
