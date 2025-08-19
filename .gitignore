@@ -4,8 +4,10 @@ checkpoints/prithvi_eo_v2_300/
 checkpoints/prithvi_eo_v2_300_tl/
 checkpoints/prithvi_eo_v2_600/
 checkpoints/prithvi_eo_v2_600_tl/
+checkpoints/prithvi_wxc_2300/
 src/
 dataset_for_landslide/data/
 dataset_for_temporal_corp/data/
 examples/
 finetuned_checkpoints/
+papers/
